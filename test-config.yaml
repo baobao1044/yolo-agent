@@ -1,0 +1,35 @@
+llm:
+    provider: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    api_key: "sk-test-key-not-real"
+    model: anthropic/claude-3.5-sonnet
+    max_tokens: 4096
+    temperature: 0.7
+agent:
+    max_iterations: 50
+    system_prompt: You are YOLO Agent, an autonomous AI assistant with computer-use capabilities. You can execute terminal commands, browse the web, control the desktop, and orchestrate multi-agent workflows. Always be helpful, precise, and safe.
+    data_dir: C:\Users\baobg\.yolo-agent
+memory:
+    driver: sqlite
+    database: C:\Users\baobg\.yolo-agent\yolo-agent.db
+    fts_enabled: true
+tools:
+    terminal_enabled: true
+    browser_enabled: true
+    computer_enabled: true
+    mcp_enabled: false
+    mcp_server_command: ""
+    terminal_allow_list: []
+    terminal_deny_list: []
+workflow:
+    enabled: true
+    max_concurrent: 16
+    max_total: 1000
+    verify_retries: 2
+ui:
+    theme: dark
+    height: 0
+    width: 0
+gateway:
+    enabled: false
+    port: 0

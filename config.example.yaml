@@ -1,0 +1,76 @@
+llm:
+  base_url: "https://openrouter.ai/api/v1"
+  api_key: ""
+  model: "anthropic/claude-3.5-sonnet"
+  max_tokens: 4096
+  temperature: 0.7
+
+agent:
+  max_iterations: 50
+  data_dir: ""
+
+memory:
+  driver: "sqlite"
+  database: ""
+  fts_enabled: true
+
+tools:
+  terminal_enabled: true
+  browser_enabled: true
+  computer_enabled: false
+  terminal_allow_list: []
+  terminal_deny_list: []
+
+workflow:
+  enabled: true
+  max_concurrent: 16
+  max_total: 1000
+  verify_retries: 2
+
+approval:
+  auto_approve_low_risk: true
+  require_approval_for:
+    - terminal
+    - computer
+    - mcp_
+  deny_patterns:
+    - '(?i)rm\\s+-rf\\s*/'
+    - '(?i)mkfs'
+    - '(?i)dd\\s+if=.*of=/dev/'
+    - '(?i)format\\s*[C-Z]:'
+    - '(?i)reg\\s+delete\\s+HKLM'
+
+mcp_servers:
+  - name: fetch
+    command: python
+    args:
+      - -m
+      - mcp_server_fetch
+
+# HTTP REST gateway
+gateway:
+  enabled: false
+  port: 8080
+
+# Messaging gateways
+telegram:
+  enabled: false
+  token: ""
+
+discord:
+  enabled: false
+  token: ""
+
+slack:
+  enabled: false
+  token: ""
+
+email:
+  enabled: false
+  smtp_host: ""
+  smtp_port: 587
+  smtp_user: ""
+  smtp_pass: ""
+
+ui:
+  theme: "dark"

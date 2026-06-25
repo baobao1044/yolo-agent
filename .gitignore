@@ -1,0 +1,44 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+yolo-agent
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go
+/vendor/
+go.sum
+!go.sum
+
+# Build
+/dist/
+/build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config & data (user-local)
+config.yaml
+yolo-config*.yaml
+*.db
+*.db-wal
+*.db-shm
+.yolo-agent/
+
+# Temp
+*.tmp
+/tmp/
