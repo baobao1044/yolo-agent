@@ -23,6 +23,7 @@ YOLO Agent is a lightweight, self-hosted AI agent written in Go. It can execute 
 - **User profile** — auto-extracts and recalls user facts and preferences
 - **Human-in-the-loop** — approval checkpoints for risky actions
 - **Skills** — reusable YAML skill definitions
+- **YOLO Mode** — run autonomous background tasks with explicit tool, budget, and time limits
 - **Cron scheduler** — run tasks on a schedule
 - **HTTP Gateway** — REST and webhook endpoints
 - **Messaging Gateways** — Telegram, Discord, Slack RTM, SMTP email
@@ -93,6 +94,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture overv
 ## 📚 Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [YOLO Mode — Background Tasks](docs/BACKGROUND.md)
 - [Getting Started](docs/GETTING_STARTED.md)
 - [MCP Auto-Discovery](docs/MCP.md)
 - [Memory & RAG](docs/MEMORY.md)
@@ -164,7 +166,39 @@ Control the desktop via MCP: click, type, screenshot, scroll, focus, accessibili
 ### `orchestrate`
 Trigger a multi-agent workflow with phases, parallel subagents, and adversarial verification.
 
+### `schedule_task` *(YOLO Mode)*
+Create a background task with a permission envelope. Define what tools it may use, how many calls/tokens it can consume, and when it runs.
+
+### `task_status`
+Inspect running and historical background tasks and their budgets.
+
 ---
+
+## 🌙 YOLO Mode — Autonomous Background Tasks
+
+YOLO Mode lets the agent work in the background with explicit guardrails called **permission envelopes**:
+
+- **Scope**: allowed/denied tool lists.
+- **Budget**: max tokens, calls, runtime, and number of runs.
+- **Schedule**: `@once`, `@interval 5m`, `@hourly`, or cron expressions.
+- **Notifications**: status updates on start, finish, error, or budget hit.
+
+Example from chat:
+
+```text
+check https://example.com every 10 minutes and tell me if the title changes.
+allowed tools: browser, respond. max calls: 50.
+```
+
+Or via HTTP:
+
+```bash
+curl -X POST http://localhost:8080/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"action":"chat","payload":{"message":"schedule a task named price-check to watch BTC price on binance.com every 5 minutes and notify me if it drops below 60000"}}'
+```
+
+See [docs/BACKGROUND.md](docs/BACKGROUND.md) for details.
 
 ## 🔒 Safety
 

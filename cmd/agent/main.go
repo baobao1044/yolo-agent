@@ -11,6 +11,7 @@ import (
 
 	"github.com/baobg/yolo-agent/internal/agent"
 	"github.com/baobg/yolo-agent/internal/approvals"
+	"github.com/baobg/yolo-agent/internal/background"
 	"github.com/baobg/yolo-agent/internal/browser"
 	"github.com/baobg/yolo-agent/internal/computeruse"
 	"github.com/baobg/yolo-agent/internal/config"
@@ -96,6 +97,14 @@ func main() {
 
 	profileStore := memory.NewProfileStore(vectorStore)
 
+	// Background task store and runner.
+	bgStore, err := background.NewStore(store.DB())
+	if err != nil {
+		logger.Error("failed to init background store", "error", err)
+		os.Exit(1)
+	}
+	bgNotifier := &backgroundNotifier{logger: logger}
+
 	// Load skills
 	skillLoader := skills.NewLoader("skills")
 	if err := skillLoader.LoadAll(); err != nil {
@@ -154,8 +163,8 @@ func main() {
 
 	orchestrator := agent.NewOrchestrator(registry, agent.OrchestratorConfig{
 		MaxConcurrent: cfg.Workflow.MaxConcurrent,
-		MaxTotal:       cfg.Workflow.MaxTotal,
-		VerifyRetries:  cfg.Workflow.VerifyRetries,
+		MaxTotal:      cfg.Workflow.MaxTotal,
+		VerifyRetries: cfg.Workflow.VerifyRetries,
 	}, logger)
 	registry.MustRegister(agent.NewOrchestrateTool(orchestrator))
 
@@ -169,8 +178,22 @@ func main() {
 		}
 	}
 
-	// Default U I callback: auto-reject unless in TUI mode. Will be overridden below.
-	var approvalCallback func(*approvals.ActionRequest) (*bool, error)
+	// Background runner and scheduler: execute agent turns inside a filtered tool registry.
+	bgRunner := background.NewRunner(bgStore, bgNotifier, logger)
+	buildRunFunc := func(ctx context.Context, env *background.Envelope) background.RunFunc {
+		return func(runCtx context.Context, instruction string) (string, error) {
+			filtered := registry.Filter(env.Scope.AllowedTools)
+			if env.Scope.AllowAll {
+				filtered = registry
+			}
+			subAgent := agent.NewAIAgent(llmClient, filtered, systemPrompt, cfg.Agent.MaxIterations, logger)
+			return runAgentTurn(runCtx, subAgent, env, instruction)
+		}
+	}
+	bgScheduler := background.NewScheduler(bgStore, bgRunner, buildRunFunc, logger)
+
+	registry.MustRegister(tools.NewScheduleTool(bgScheduler))
+	registry.MustRegister(tools.NewEnvelopeStateTool(bgStore))
 
 	workflow.DefaultSubagentExecutor = func(ctx context.Context, prompt string, filteredRegistry *tools.Registry) (string, error) {
 		subAgent := agent.NewAIAgent(llmClient, filteredRegistry, systemPrompt, cfg.Agent.MaxIterations, logger)
@@ -178,6 +201,21 @@ func main() {
 	}
 
 	mainAgent := agent.NewAIAgent(llmClient, registry, systemPrompt, cfg.Agent.MaxIterations, logger)
+
+	approvalCallback := func(req *approvals.ActionRequest) (*bool, error) {
+		logger.Warn("Approval required but not in interactive mode.",
+			"id", req.ID,
+			"tool", req.ToolName,
+			"risk", req.Risk,
+			"reason", req.Reason,
+		)
+		approved := false
+		return &approved, nil
+	}
+
+	checkpoint := approvals.NewCheckpoint(approvalPolicy, approvalStore, approvalCallback)
+	// Wire checkpoint by wrapping tool execution in the future.
+	_ = checkpoint
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -188,29 +226,6 @@ func main() {
 		<-sigChan
 		cancel()
 	}()
-
-	// HTTP Gateway
-	var httpGateway *gateway.Gateway
-	if cfg.Gateway.Port > 0 {
-		httpGateway = gateway.NewGateway(cfg.Gateway.Port, func(ctx context.Context, req *gateway.GatewayRequest) (*gateway.GatewayResponse, error) {
-			if req.Action != "chat" {
-				return &gateway.GatewayResponse{Success: false, Error: "unsupported action"}, nil
-			}
-			payload, _ := req.Payload["message"].(string)
-			resp, err := handleAgent(ctx, mainAgent, store, vectorStore, profileStore, "default", payload, logger)
-			if err != nil {
-				return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
-			}
-			return &gateway.GatewayResponse{Success: true, Message: resp}, nil
-		}, logger)
-
-		if err := httpGateway.Start(ctx); err != nil {
-			logger.Error("failed to start gateway", "error", err)
-			os.Exit(1)
-		}
-		defer httpGateway.Stop(ctx)
-		logger.Info("gateway started", "port", cfg.Gateway.Port)
-	}
 
 	// Messaging gateways
 	var transports []gateway.Transport
@@ -249,23 +264,46 @@ func main() {
 		}
 	}()
 
-	// Helper to pause for risky tool executions.
-	// In TUI mode we can't easily prompt inline, so require config-based auto-approve for non-TUI use.
-	approvalCallback = func(req *approvals.ActionRequest) (*bool, error) {
-		// Non-interactive mode: default reject.
-		logger.Warn("Approval required but not in interactive mode.",
-			"id", req.ID,
-			"tool", req.ToolName,
-			"risk", req.Risk,
-			"reason", req.Reason,
-		)
-		approved := false
-		return &approved, nil
+	// HTTP Gateway
+	var httpGateway *gateway.Gateway
+	if cfg.Gateway.Port > 0 {
+		httpGateway = gateway.NewGateway(cfg.Gateway.Port, func(ctx context.Context, req *gateway.GatewayRequest) (*gateway.GatewayResponse, error) {
+			switch req.Action {
+			case "chat":
+				payload, _ := req.Payload["message"].(string)
+				resp, err := handleAgent(ctx, mainAgent, store, vectorStore, profileStore, "default", payload, logger)
+				if err != nil {
+					return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
+				}
+				return &gateway.GatewayResponse{Success: true, Message: resp}, nil
+			case "task_status":
+				return handleTaskStatus(bgStore, req.Payload)
+			case "task_pause":
+				return handleTaskPause(bgRunner, bgStore, req.Payload)
+			case "task_resume":
+				return handleTaskResume(bgScheduler, req.Payload)
+			case "task_kill":
+				return handleTaskKill(bgRunner, req.Payload)
+			default:
+				return &gateway.GatewayResponse{Success: false, Error: "unsupported action"}, nil
+			}
+		}, logger)
+
+		if err := httpGateway.Start(ctx); err != nil {
+			logger.Error("failed to start gateway", "error", err)
+			os.Exit(1)
+		}
+		defer httpGateway.Stop(ctx)
+		logger.Info("gateway started", "port", cfg.Gateway.Port)
 	}
 
-	checkpoint := approvals.NewCheckpoint(approvalPolicy, approvalStore, approvalCallback)
-	// Wire checkpoint by wrapping tool execution in the future.
-	_ = checkpoint
+	// Start the background scheduler after all dependencies exist.
+	if err := bgScheduler.Start(ctx); err != nil {
+		logger.Error("failed to start background scheduler", "error", err)
+		os.Exit(1)
+	}
+	defer bgScheduler.Stop()
+	logger.Info("background scheduler started")
 
 	if *oneShot != "" {
 		logger.Info("running one-shot message", "message", *oneShot)
@@ -288,6 +326,22 @@ func main() {
 		logger.Error("TUI error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// runAgentTurn executes a single agent turn inside an envelope and enforces runtime budgets.
+func runAgentTurn(ctx context.Context, subAgent *agent.AIAgent, env *background.Envelope, instruction string) (string, error) {
+	if err := env.CheckBudget(0, 1); err != nil {
+		return "", err
+	}
+
+	resp, err := subAgent.Run(ctx, instruction)
+	if err != nil {
+		return "", err
+	}
+
+	// Approximate usage: one tool/agent run counted against the envelope budget.
+	env.RecordUsage(0, 1)
+	return resp, nil
 }
 
 // handleAgent runs the agent with memory injection and persistence.
@@ -356,4 +410,81 @@ func handleAgent(ctx context.Context, mainAgent *agent.AIAgent, store *memory.St
 		logger.Warn("failed to save conversation", "error", err)
 	}
 	return resp, nil
+}
+
+// backgroundNotifier emits background task status updates.
+// Today it logs to stderr; messaging transports can be wired here once a default
+// target chat ID is configured.
+type backgroundNotifier struct {
+	logger *slog.Logger
+}
+
+// Notify implements background.Notifier.
+func (n *backgroundNotifier) Notify(ctx context.Context, envelopeID, title, message string, channels []string) error {
+	n.logger.Info("background notification",
+		"envelope", envelopeID,
+		"title", title,
+		"message", message,
+		"channels", channels,
+	)
+	return nil
+}
+
+// HTTP task control helpers.
+
+func handleTaskStatus(store *background.Store, payload map[string]any) (*gateway.GatewayResponse, error) {
+	id, _ := payload["id"].(string)
+	if id != "" {
+		env, err := store.Get(id)
+		if err != nil {
+			return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
+		}
+		return &gateway.GatewayResponse{Success: true, Data: env.Snapshot()}, nil
+	}
+	envs, err := store.List()
+	if err != nil {
+		return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
+	}
+	var out []background.Envelope
+	for _, env := range envs {
+		out = append(out, env.Snapshot())
+	}
+	return &gateway.GatewayResponse{Success: true, Data: out}, nil
+}
+
+func handleTaskPause(runner *background.Runner, store *background.Store, payload map[string]any) (*gateway.GatewayResponse, error) {
+	id, ok := payload["id"].(string)
+	if !ok || id == "" {
+		return &gateway.GatewayResponse{Success: false, Error: "id is required"}, nil
+	}
+	// Kill any active run, then pause scheduling.
+	_ = runner.Kill(id)
+	env, err := runner.Pause(id)
+	if err != nil {
+		return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
+	}
+	return &gateway.GatewayResponse{Success: true, Data: env.Snapshot()}, nil
+}
+
+func handleTaskResume(scheduler *background.Scheduler, payload map[string]any) (*gateway.GatewayResponse, error) {
+	id, ok := payload["id"].(string)
+	if !ok || id == "" {
+		return &gateway.GatewayResponse{Success: false, Error: "id is required"}, nil
+	}
+	env, err := scheduler.Resume(id)
+	if err != nil {
+		return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
+	}
+	return &gateway.GatewayResponse{Success: true, Data: env.Snapshot()}, nil
+}
+
+func handleTaskKill(runner *background.Runner, payload map[string]any) (*gateway.GatewayResponse, error) {
+	id, ok := payload["id"].(string)
+	if !ok || id == "" {
+		return &gateway.GatewayResponse{Success: false, Error: "id is required"}, nil
+	}
+	if err := runner.Kill(id); err != nil {
+		return &gateway.GatewayResponse{Success: false, Error: err.Error()}, nil
+	}
+	return &gateway.GatewayResponse{Success: true, Message: "task killed"}, nil
 }
