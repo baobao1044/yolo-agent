@@ -15,7 +15,7 @@ Thank you for your interest in contributing!
 ## Development Setup
 
 ```bash
-git clone https://github.com/baobg/yolo-agent.git
+git clone https://github.com/baobao1044/yolo-agent.git
 cd yolo-agent
 go mod download
 go build -o yolo-agent ./cmd/agent

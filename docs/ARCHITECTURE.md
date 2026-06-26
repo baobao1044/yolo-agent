@@ -15,12 +15,16 @@ YOLO Agent is designed as a lightweight, modular autonomous AI agent. This docum
                     │  LLM → Tools     │
                     └────────┬─────────┘
                              │ tool calls
-              ┌──────────────┼──────────────┐
-              ▼              ▼              ▼
-        ┌──────────┐   ┌──────────┐   ┌──────────┐
-        │ Terminal │   │ Browser  │   │Computer/ │
-        │          │   │(chromedp)│   │ MCP     │
-        └──────────┘   └──────────┘   └──────────┘
+              ┌──────────────┼──────────────┬──────────────┐
+              ▼              ▼              ▼              ▼
+        ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌────────────┐
+        │ Terminal │   │ Browser  │   │Computer/ │   │  Code-RAG  │
+        │          │   │(chromedp)│   │ MCP      │   │ (CORE eng.)│
+        └──────────┘   └──────────┘   └──────────┘   └─────┬──────┘
+                                                          │
+                                                          ▼
+                                                   SQLite index
+                                                   (symbols/edges)
                              │
                              ▼
                 ┌────────────────────┐
@@ -127,6 +131,15 @@ Unified `Envelope` abstraction allows the same agent logic to respond to:
 - Discord bot
 - Slack RTM
 - SMTP email
+
+### 8. CORE Code-RAG Engine (`internal/corerag`, `internal/embeddings`)
+
+A budget-aware repository context engine. It indexes a codebase into a call/import graph and, at query time, assembles a token-budgeted context by choosing graduated representation levels per symbol (raw → sig+docs → interface → stub), framed as a Multi-Choice Knapsack Problem solved greedily in `O(|V| log |V|)`.
+
+- `index_repo` — walk → parse → classify → degree → embed → persist to SQLite
+- `repo_query` — semantic rank → BFS expand → core/peripheral split → greedy MCKP allocation → SACRS materialization → cited context
+
+Wired in `cmd/agent/main.go` under `corerag.enabled` with soft-failure on init error (matching the MCP/browser pattern). The embedding backends (ONNX / API / Ollama / Mock) live in `internal/embeddings` and are shared with the memory system. See [CORERAG.md](CORERAG.md) for the full design.
 
 ## Data Flow
 

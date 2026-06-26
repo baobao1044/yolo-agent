@@ -4,7 +4,7 @@
 
 ### Download prebuilt binary
 
-See [GitHub Releases](https://github.com/baobg/yolo-agent/releases).
+See [GitHub Releases](https://github.com/baobao1044/yolo-agent/releases).
 
 ### Build from source
 
@@ -14,7 +14,7 @@ Requirements:
 - Optional: MCP server binaries
 
 ```bash
-git clone https://github.com/baobg/yolo-agent.git
+git clone https://github.com/baobao1044/yolo-agent.git
 cd yolo-agent
 go build -ldflags="-s -w" -o yolo-agent ./cmd/agent
 ```
@@ -78,6 +78,25 @@ telegram:
   token: "YOUR_BOT_TOKEN"
 ```
 
+### Enable Code-RAG (CORE engine)
+
+Index whole repositories and let the agent retrieve budget-aware, citation-tagged context for natural-language questions. See [CORERAG.md](CORERAG.md) for the full design.
+
+```yaml
+# ~/.yolo-agent/config.yaml
+corerag:
+  enabled: true
+  budget: 4096        # token budget for assembled context
+  depth: 2            # BFS expansion depth
+  embedding:
+    provider: onnx     # onnx (local) | api | ollama | mock
+    fallback: api      # used if the primary provider fails to init
+    model: "bge-small-en-v1.5"
+    dim: 384
+```
+
+Then ask the agent: *"index the repo at /home/me/myproject and explain how the auth flow works."* The agent calls `index_repo`, then `repo_query`, and reasons over a budget-capped slice of the codebase.
+
 ### Approval policy
 
 ```yaml
@@ -95,12 +114,14 @@ approval:
 
 | Variable | Description |
 |---|---|
-| `YOLO_API_KEY` | LLM API key |
+| `YOLO_API_KEY` | LLM API key (overrides `llm.api_key`) |
 | `YOLO_CONFIG` | Path to config file |
+| `YOLO_ONNX_LIB` | Path to `libonnxruntime` for ONNX embeddings |
 
 ## Next Steps
 
 - Read [Architecture](ARCHITECTURE.md)
+- Read [CORE Code-RAG](CORERAG.md)
 - Read [MCP](MCP.md)
 - Read [Memory](MEMORY.md)
 - Read [Workflows](WORKFLOW.md)
