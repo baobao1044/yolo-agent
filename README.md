@@ -1,5 +1,9 @@
 # YOLO Agent
 
+<p align="center">
+  <img src="docs/assets/yolo-agent-banner.svg" alt="YOLO Agent — autonomous AI agent in Go with budget-aware Code-RAG" width="100%">
+</p>
+
 [![Go Version](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/github/license/baobao1044/yolo-agent?color=blue)](LICENSE)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
