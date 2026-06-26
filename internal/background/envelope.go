@@ -179,11 +179,32 @@ func (e *Envelope) SetStatus(s Status) {
 	e.UpdatedAt = time.Now().UTC()
 }
 
-// Snapshot returns a copy safe for JSON serialization.
+// Snapshot returns a copy safe for JSON serialization. It copies each field
+// individually rather than dereferencing the receiver, which would copy the
+// embedded sync.RWMutex (a go vet copylocks violation) and produce an
+// unlocked, unusable copy.
 func (e *Envelope) Snapshot() Envelope {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return *e
+	return Envelope{
+		ID:          e.ID,
+		Name:        e.Name,
+		Description: e.Description,
+		Instruction: e.Instruction,
+		Schedule:    e.Schedule,
+		Scope:       e.Scope,
+		Budget:      e.Budget,
+		Notify:      e.Notify,
+		Status:      e.Status,
+		CreatedAt:   e.CreatedAt,
+		UpdatedAt:   e.UpdatedAt,
+		LastRunAt:   e.LastRunAt,
+		NextRunAt:   e.NextRunAt,
+		RunCount:    e.RunCount,
+		TotalCalls:  e.TotalCalls,
+		TotalTokens: e.TotalTokens,
+		Errors:      e.Errors,
+	}
 }
 
 // Validate checks the envelope for sanity.

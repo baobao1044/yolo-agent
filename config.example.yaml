@@ -40,6 +40,31 @@ approval:
     - '(?i)format\\s*[C-Z]:'
     - '(?i)reg\\s+delete\\s+HKLM'
 
+# CORE Code-RAG engine: index a repository and retrieve budget-aware context.
+# Disabled by default to avoid the ONNX/dependency setup cost; enable when you
+# want repo-level code reasoning.
+corerag:
+  enabled: false
+  budget: 4096        # token budget B for assembled context
+  depth: 2            # BFS expansion depth k
+  embedding:
+    provider: onnx              # onnx (default, local) | api | ollama | mock
+    fallback: api              # used if the primary provider fails to init
+    model: "bge-small-en-v1.5"
+    dim: 384
+    model_path: ""             # path to the .onnx file (for onnx); vocab.txt beside it
+    lib_path: ""               # onnxruntime shared lib; empty = env YOLO_ONNX_LIB
+    ollama_url: "http://localhost:11434"
+    ollama_model: ""
+  relevance:
+    alpha: 0.4    # semantic similarity weight
+    beta: 0.2     # edge weight
+    gamma: 0.2    # centrality (out-degree) weight
+    delta: 0.2    # utility penalty (in-degree) weight
+    theta: 0.15   # S(v) >= theta required to expand a node
+  # priors: optional override of compression prior R(k,Type) from CORE doc
+  # Table 1. Omit to use the built-in defaults.
+
 mcp_servers:
   - name: fetch
     command: python

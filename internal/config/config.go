@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/baobg/yolo-agent/internal/approvals"
+	"github.com/baobg/yolo-agent/internal/corerag"
 	"github.com/baobg/yolo-agent/internal/gateway"
 	"github.com/baobg/yolo-agent/internal/mcp"
 	"gopkg.in/yaml.v3"
@@ -26,6 +27,7 @@ type Config struct {
 	Slack    gateway.SlackConfig    `yaml:"slack"`
 	Email    gateway.EmailConfig    `yaml:"email"`
 	Approval approvals.Policy       `yaml:"approval"`
+	CoreRAG  corerag.CoreRAGConfig  `yaml:"corerag"`
 }
 
 // LLMConfig configures the LLM provider.
@@ -125,6 +127,7 @@ func DefaultConfig() *Config {
 			Port:    0,
 		},
 		Approval: *approvals.DefaultPolicy(),
+		CoreRAG:  corerag.DefaultCoreRAG(),
 	}
 }
 
