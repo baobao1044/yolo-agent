@@ -142,3 +142,34 @@ func convertFromOpenAIResponse(resp openai.ChatCompletionResponse) *ChatResponse
 func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
+
+// CreateEmbeddings calls the OpenAI-compatible /v1/embeddings endpoint for a
+// batch of texts. It satisfies the embeddings.LLMEmbedder interface. When
+// model is empty, the client's configured chat model is used (callers should
+// pass a dedicated embedding model name instead).
+func (c *OpenAIClient) CreateEmbeddings(ctx context.Context, texts []string, model string) ([][]float32, error) {
+	req := openai.EmbeddingRequest{
+		Input: texts,
+	}
+	if model != "" {
+		req.Model = openai.EmbeddingModel(model)
+	} else {
+		req.Model = openai.EmbeddingModel(c.model)
+	}
+
+	resp, err := c.client.CreateEmbeddings(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("create embeddings: %w", err)
+	}
+
+	out := make([][]float32, len(resp.Data))
+	for i, d := range resp.Data {
+		// The API may return embeddings out of index order; sort by Index if present.
+		if int(d.Index) < len(out) {
+			out[d.Index] = d.Embedding
+		} else {
+			out[i] = d.Embedding
+		}
+	}
+	return out, nil
+}

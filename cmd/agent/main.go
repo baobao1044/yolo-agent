@@ -15,6 +15,8 @@ import (
 	"github.com/baobg/yolo-agent/internal/browser"
 	"github.com/baobg/yolo-agent/internal/computeruse"
 	"github.com/baobg/yolo-agent/internal/config"
+	"github.com/baobg/yolo-agent/internal/corerag"
+	"github.com/baobg/yolo-agent/internal/embeddings"
 	"github.com/baobg/yolo-agent/internal/gateway"
 	"github.com/baobg/yolo-agent/internal/llm"
 	"github.com/baobg/yolo-agent/internal/memory"
@@ -151,6 +153,31 @@ func main() {
 	registry.MustRegister(tools.NewTerminalTool(cfg.Tools.TerminalAllowList, cfg.Tools.TerminalDenyList))
 	registry.MustRegister(tools.NewBrowserTool(browserInstance))
 	registry.MustRegister(tools.NewComputerTool(desktopController))
+
+	// CORE Code-RAG engine: index a repository and retrieve budget-aware
+	// context. Initialized lazily and registered only when enabled; failures
+	// (e.g. missing ONNX model) fall back softly so the agent still runs.
+	var coreragEngine *corerag.Engine
+	if cfg.CoreRAG.Enabled {
+		if err := cfg.CoreRAG.Validate(); err != nil {
+			logger.Warn("invalid corerag config; disabling", "error", err)
+		} else {
+			crStore, err := corerag.NewStore(store.DB())
+			if err != nil {
+				logger.Warn("failed to init corerag store; disabling", "error", err)
+			} else {
+				embedder, err := embeddings.NewEmbedder(cfg.CoreRAG.Embedding, llmClient, logger)
+				if err != nil {
+					logger.Warn("failed to init corerag embedder; disabling", "error", err)
+				} else {
+					coreragEngine = corerag.NewEngine(crStore, embedder, cfg.CoreRAG, logger)
+					registry.MustRegister(corerag.NewIndexRepoTool(coreragEngine))
+					registry.MustRegister(corerag.NewRepoQueryTool(coreragEngine))
+					logger.Info("corerag enabled", "embedding", cfg.CoreRAG.Embedding.Provider)
+				}
+			}
+		}
+	}
 
 	// Connect MCP servers and register discovered tools
 	mcpManager := mcp.NewManager(cfg.McpServers, registry, logger)
